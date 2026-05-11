@@ -1,0 +1,206 @@
+{
+  /**
+   * launch.json - VSCode 调试配置文件。
+   *
+   * 本文件定义 VSCode 中可用的调试配置（按 F5 时出现的选项）。
+   * 每个对象在 "configurations" 数组中代表一个调试配置。
+   *
+   * 如何添加新配置：
+   *   1. 在 configurations 数组中添加一个新对象。
+   *   2. 设置 name（显示名称）、type（调试器类型）、request（launch/attach）。
+   *   3. 根据调试器类型设置其他参数（如 program、cwd 等）。
+   *
+   * 变量替换：
+   *   ${workspaceFolder} → 当前打开的工作区根目录路径。
+   *   ${file} → 当前活动文件的路径。
+   *   ${fileBasename} → 当前文件的文件名（不含路径）。
+   *   ${workspaceFolderBasename} → 工作区文件夹名。
+   */
+  "version": "0.2.0",
+  /**
+   * configurations: 调试配置数组。
+   * 每个配置对应 "Run and Debug" 下拉菜单中的一个选项。
+   */
+  "configurations": [
+    /**
+     * 配置 1：运行扩展（开发调试）。
+     *
+     * 这是 VSCode 扩展开发专用的调试配置。
+     * 按 F5 选择此配置会：
+     *   1. 编译 TypeScript 代码（通过 preLaunchTask）。
+     *   2. 启动一个新的 VSCode 窗口（Extension Development Host）。
+     *   3. 在这个新窗口中加载当前正在开发的扩展。
+     *
+     * 在新窗口中：
+     *   - 可以测试扩展的功能（如打开 C++ 文件、启动 GDB 调试）。
+     *   - 在原来的 VSCode 窗口中，可以设置断点、查看变量、单步调试扩展代码。
+     *
+     * 这是 VSCode 扩展开发的标准调试流程。
+     */
+    {
+      /**
+       * name: 配置在 "Run and Debug" 菜单中显示的名称。
+       * 用户可以自定义，建议清晰描述用途。
+       */
+      "name": "Run Extension",
+      /**
+       * type: 调试器类型。
+       *
+       * "extensionHost" 是 VSCode 内置的调试器类型，专门用于调试扩展。
+       * 它会启动一个新的 VSCode 实例（Extension Host），并连接调试器。
+       *
+       * 其他常见类型：
+       *   - "cppdbg": C/C++ 调试（GDB/LLDB）
+       *   - "python": Python 调试
+       *   - "node": Node.js 调试
+       *   - "chrome": Chrome 浏览器调试
+       */
+      "type": "extensionHost",
+      /**
+       * request: 调试请求类型。
+       *
+       * "launch" 表示启动一个新进程进行调试。
+       * "attach" 表示连接到一个已经运行的进程。
+       *
+       * 扩展开发使用 launch，因为我们需要启动新的 Extension Host。
+       */
+      "request": "launch",
+      /**
+       * args: 传递给 Extension Host 的命令行参数。
+       *
+       * "--extensionDevelopmentPath" 告诉 VSCode 从哪个目录加载扩展。
+       * ${workspaceFolder} 会被替换为当前工作区的绝对路径。
+       *
+       * 这个参数的作用：
+       *   不安装扩展（不复制到 VSCode 的 extensions 目录），
+       *   而是直接从源代码目录加载，方便开发调试。
+       *   修改代码后重新编译，新窗口中立即生效（无需重新安装）。
+       */
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      /**
+       * outFiles: 断点映射文件。
+       *
+       * 由于 TypeScript 需要编译为 JavaScript 才能运行，
+       * VSCode 的调试器需要将断点位置从 .ts 文件映射到 .js 文件。
+       *
+       * 这个数组告诉调试器在哪里查找编译后的 .js 文件。
+       * ${workspaceFolder}/out/** .js 匹配 out 目录下所有 .js 文件。
+       *
+       * ** 表示任意层级的子目录。
+       * 例如：out/extension.js、out/utils/helper.js 都会匹配。
+       */
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      /**
+       * preLaunchTask: 在启动调试前自动执行的任务。
+       *
+       * "${defaultBuildTask}" 引用 tasks.json 中定义为默认构建的任务。
+       * 这确保每次按 F5 调试前，代码都会被重新编译。
+       *
+       * 如果不设置，可能需要手动运行 npm run compile 才能应用最新代码。
+       */
+      "preLaunchTask": "${defaultBuildTask}"
+    },
+    /**
+     * 配置 2：使用 GDB 调试 C++ 测试程序。
+     *
+     * 这个配置用于在 Extension Development Host 窗口中调试 C++ 代码。
+     * 流程：
+     *   1. 在 Extension Host 中打开 test_radar.cpp。
+     *   2. 设置断点。
+     *   3. 按 F5，选择 "Debug C++ with GDB"。
+     *   4. 程序会在断点处暂停，可以查看变量。
+     *   5. 同时，Radar Signal Visualizer 扩展会自动检测到断点，
+     *      并在 Signals 面板中显示匹配的变量。
+     *
+     * 这个配置依赖于 C/C++ 扩展（ms-vscode.cpptools），
+     * 需要先安装该扩展才能使用 cppdbg 调试器。
+     */
+    {
+      "name": "Debug C++ with GDB",
+      /**
+       * type: "cppdbg" 是 C/C++ 扩展提供的调试器类型。
+       * 支持 GDB（Linux）和 LLDB（macOS）。
+       */
+      "type": "cppdbg",
+      "request": "launch",
+      /**
+       * program: 要调试的可执行文件路径。
+       *
+       * ${workspaceFolder}/build/test_radar 是通过 CMake 编译生成的测试程序。
+       * 需要先用 CMake 编译（带调试符号 -g）：
+       *   mkdir build && cd build
+       *   cmake -DCMAKE_BUILD_TYPE=Debug ..
+       *   make
+       */
+      "program": "${workspaceFolder}/build/test_radar",
+      /**
+       * args: 传递给程序的命令行参数。
+       * 空数组表示不传递参数。
+       * 例如：如果程序需要文件名作为参数，可以设置为 ["input.txt"]。
+       */
+      "args": [],
+      /**
+       * stopAtEntry: 是否在程序入口点（main 函数）暂停。
+       *
+       * false 表示直接运行到第一个断点（或程序结束）。
+       * true 表示在 main 函数第一行暂停，方便逐步调试。
+       */
+      "stopAtEntry": false,
+      /**
+       * cwd: 当前工作目录（Current Working Directory）。
+       * 程序运行时的当前目录（影响相对路径的解析）。
+       */
+      "cwd": "${workspaceFolder}",
+      /**
+       * environment: 环境变量数组。
+       * 每个元素是 { name: "变量名", value: "值" }。
+       * 空数组表示不设置额外环境变量。
+       */
+      "environment": [],
+      /**
+       * externalConsole: 是否使用外部控制台窗口。
+       *
+       * false 表示在 VSCode 的集成终端中显示输出。
+       * true 会弹出一个独立的终端窗口（某些场景下有用，如需要用户输入）。
+       */
+      "externalConsole": false,
+      /**
+       * MIMode: 使用的调试器。
+       *
+       * "gdb" 表示使用 GDB（GNU Debugger）。
+       * 在 macOS 上通常是 "lldb"。
+       */
+      "MIMode": "gdb",
+      /**
+       * setupCommands: 在调试开始前发送给调试器的命令数组。
+       *
+       * 这些命令在程序启动前执行，用于配置调试器行为。
+       *
+       * 这里启用 GDB 的 pretty-printing 功能：
+       *   -enable-pretty-printing
+       *
+       * pretty-printing 的作用：
+       *   C++ STL 容器（如 std::vector、std::string）在 GDB 中的原始显示
+       *   是内部结构（指针、长度等），不可读。
+       *   启用 pretty-printing 后，GDB 会显示友好的格式：
+       *     std::vector<float> = {0.1, 0.2, 0.3, ...}
+       *   而不是：
+       *     {_M_impl = {_M_start = 0x7fff..., _M_finish = 0x7fff...}}
+       *
+       * ignoreFailures: true 表示如果此命令失败（如 GDB 版本不支持），
+       * 不要报错，继续执行。
+       */
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  /**
+   * tasks.json - VSCode 任务配置文件。
+   *
+   * 本文件定义 VSCode 中可执行的任务（编译、测试、打包等）。
+   * 任务类似于 Makefile 中的 target 或 npm scripts，
+   * 但可以在 VSCode 内部运行，并与编辑器集成（如问题面板显示编译错误）。
+   *
+   * 如何运行任务：
+   *   - Ctrl+Shift+P → "Tasks: Run Task" → 选择任务
+   *   - Ctrl+Shift+B → 运行默认构建任务（build task）
+   *   - launch.json 中的 preLaunchTask 自动触发
+   *
+   * 任务类型（type）：
+   *   - "npm": 运行 npm scripts（如 npm run compile）
+   *   - "shell": 运行 Shell 命令（如 "gcc test.c -o test"）
+   *   - "process": 运行可执行文件
+   */
+  "version": "2.0.0",
+
+  /**
+   * tasks: 任务数组，每个对象定义一个任务。
+   */
+  "tasks": [
+    {
+      /**
+       * type: 任务类型。
+       *
+       * "npm" 表示运行 package.json 中定义的 npm script。
+       * 需要配合 "script" 字段指定脚本名。
+       *
+       * 其他常见类型：
+       *   - "shell": 运行任意 Shell 命令（如 "cmake .. && make"）
+       *   - "process": 运行可执行文件（如 "python", "node"）
+       */
+      "type": "npm",
+
+      /**
+       * script: npm 脚本名。
+       *
+       * 对应 package.json 中 scripts 字段的键名。
+       * 这里设置为 "watch"，即运行 "npm run watch"。
+       *
+       * watch 脚本的作用：
+       *   使用 esbuild 监控 src/ 目录的文件变化，
+       *   每当保存文件时，自动重新编译并输出到 out/ 目录。
+       *
+       * 开发时的工作流：
+       *   1. 按 Ctrl+Shift+B 启动 watch 任务（后台运行）。
+       *   2. 编辑 .ts 文件，保存。
+       *   3. esbuild 自动编译，生成新的 out/extension.js。
+       *   4. 在 Extension Host 窗口中重新加载（Ctrl+Shift+P → "Developer: Reload Window"）。
+       *   5. 看到最新效果。
+       *
+       * 这样不需要每次修改后手动运行 npm run compile。
+       */
+      "script": "watch",
+
+      /**
+       * problemMatcher: 问题匹配器。
+       *
+       * VSCode 使用 problemMatcher 来解析任务输出中的编译错误和警告，
+       * 并在"问题"面板（Problems）中显示，方便点击跳转到出错代码行。
+       *
+       * "$tsc-watch" 是 VSCode 内置的问题匹配器，用于 TypeScript 编译器。
+       * 它能识别 tsc 或 esbuild 输出的错误格式：
+       *   src/extension.ts(10,5): error TS2304: Cannot find name 'foo'
+       *   ^文件路径        ^行号 ^列号       ^错误类型        ^错误消息
+       *
+       * 如果使用其他编译器（如 gcc），需要使用不同的 problemMatcher，
+       * 或者自定义匹配规则（正则表达式）。
+       */
+      "problemMatcher": "$tsc-watch",
+
+      /**
+       * isBackground: 是否是后台任务。
+       *
+       * true 表示任务会持续运行（如 watch 模式），不会自动结束。
+       * VSCode 会认为这个任务在后台持续监控文件变化。
+       *
+       * false 表示任务是短暂的（如一次性编译），完成后自动退出。
+       * 如果 watch 任务设为 false，VSCode 会显示"任务正在运行"提示。
+       */
+      "isBackground": true,
+
+      /**
+       * presentation: 任务输出面板的显示配置。
+       *
+       * reveal: 控制何时显示任务输出面板。
+       *   - "always": 任务启动时总是显示面板。
+       *   - "never": 从不自动显示面板（在后台静默运行）。
+       *   - "silent": 仅在任务出错时显示面板。
+       *
+       * 这里设为 "never"，因为 watch 任务在后台运行，
+       * 不需要每次都弹出终端面板打断工作。
+       * 如果编译出错，问题面板会显示错误，不需要看终端输出。
+       */
+      "presentation": {
+        "reveal": "never"
+      },
+
+      /**
+       * group: 任务分组。
+       *
+       * 将任务归类到特定组，影响快捷键和菜单的行为。
+       *
+       * kind: 组类型。
+       *   - "build": 构建任务（编译、打包等）。
+       *     快捷键 Ctrl+Shift+B 运行此组的默认任务。
+       *   - "test": 测试任务（运行测试用例）。
+       *   - "none": 不分组。
+       *
+       * isDefault: 是否是该组的默认任务。
+       *   true 表示按 Ctrl+Shift+B 时直接运行此任务，不需要选择。
+       *   如果多个任务都设为 true，VSCode 会弹窗让用户选择。
+       */
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

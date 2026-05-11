@@ -1,0 +1,101 @@
+{
+  "name": "radar-signal-visualizer",
+  "displayName": "Radar Signal Visualizer",
+  "description": "Visualize radar signals during GPU debugging",
+  "version": "0.0.1",
+  "publisher": "your-publisher",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Debuggers"
+  ],
+  "activationEvents": [
+    "onDebug"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Radar Signal Visualizer",
+      "properties": {
+        "rsv.autoDisplayOnBreakpoint": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically show signal variables on breakpoint"
+        },
+        "rsv.signalNamePatterns": {
+          "type": "array",
+          "default": ["*signal*", "*data*", "*pulse*", "*sample*"],
+          "description": "Variable name patterns to identify as signals"
+        },
+        "rsv.maxArraySize": {
+          "type": "number",
+          "default": 100000,
+          "description": "Maximum array size to auto-visualize"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "rsv-container",
+          "title": "Radar Signals",
+          "icon": "assets/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "rsv-container": [
+        {
+          "id": "rsvSignals",
+          "name": "Signals"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "rsv.visualizeVariable",
+        "title": "Visualize Signal"
+      },
+      {
+        "command": "rsv.openPanel",
+        "title": "Open Radar Visualizer"
+      },
+      {
+        "command": "rsv.refreshSignals",
+        "title": "Refresh Signal Variables",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "rsv.refreshSignals",
+          "when": "view == rsvSignals",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "rsv.visualizeVariable",
+          "when": "view == rsvSignals"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --watch"
+  },
+  "devDependencies": {
+    "@types/chart.js": "^2.9.41",
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.116.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1"
+  }
+}
