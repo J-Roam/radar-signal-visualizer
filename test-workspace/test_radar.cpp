@@ -1,7 +1,7 @@
-#include <iostream>
-#include <vector>
 #include <cmath>
+#include <iostream>
 #include <random>
+#include <vector>
 
 // 生成测试信号数据
 void generatePulseSignal(std::vector<float>& signal, int size) {
@@ -45,7 +45,8 @@ int main() {
     // 混合信号
     std::vector<float> mixed_signal(SIGNAL_SIZE);
     for (int i = 0; i < SIGNAL_SIZE; i++) {
-        mixed_signal[i] = pulse_data[i] + 0.3f * noise_data[i];
+        // mixed_signal[i] = pulse_data[i] + 0.3f * noise_data[i];
+        mixed_signal[i] = i;
     }
 
     std::cout << "Radar Signal Processing Test" << std::endl;

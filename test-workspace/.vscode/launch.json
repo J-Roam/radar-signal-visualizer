@@ -1,0 +1,102 @@
+{
+  /**
+   * test-workspace/.vscode/launch.json
+   * ----------------------------------
+   * 这是"被测试工程"的调试配置文件。
+   *
+   * 本目录作为独立的 VSCode 工作区，在 Extension Development Host
+   * 新窗口中被自动打开。这样可以绕开 VSCode 的"同一文件夹不能在两个
+   * 窗口同时打开"的限制。
+   *
+   * 工作流：
+   *   1. 在开发扩展的主窗口按 F5 → 选 "Run Extension"
+   *      → 自动打开一个新的 Extension Development Host 窗口
+   *      → 新窗口会自动加载本目录（test-workspace/）作为工作区
+   *      → 雷达信号可视化扩展已加载到新窗口中。
+   *   2. 在新窗口里打开 test_radar.cpp 或 test_radar.cu，设置断点。
+   *   3. 新窗口按 F5 → 选 "Debug C++ with GDB" 或 "Debug CUDA with cuda-gdb"。
+   *   4. 程序命中断点后，左侧 "Radar Signals" 面板会自动显示信号变量。
+   *
+   * 构建：在 test-workspace/ 目录下运行 ./build.sh
+   *   生成 test-workspace/build/test_radar 和 test-workspace/build/test_radar_cuda
+   */
+  "version": "0.2.0",
+  "configurations": [
+    /**
+     * 配置 1：使用 GDB 调试 C++ 测试程序（CPU 版本）。
+     *
+     * 依赖：C/C++ 扩展（ms-vscode.cpptools）。
+     */
+    {
+      "name": "Debug C++ with GDB",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/test_radar",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      /**
+       * 启用 GDB pretty-printing，让 std::vector 等 STL 容器显示友好格式。
+       */
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    },
+    /**
+     * 配置 2：使用 cuda-gdb 调试 CUDA 测试程序（GPU 版本）。
+     *
+     * 依赖：NVIDIA Nsight Visual Studio Code Edition 扩展。
+     *
+     * 断点选择：
+     *   - host 断点（推荐）：main 函数内 cudaMemcpy 之后的 std::cout。
+     *     此时 std::vector<float> 已包含 GPU 结果，插件按原逻辑识别。
+     *   - device 断点（进阶）：在 __global__ kernel 内部设断点。
+     *     cuda-gdb 会暂停在一个 CUDA 线程上。
+     *
+     * 兼容性：
+     *   插件内部用 DebugAdapterTrackerFactory('*') 全局监听，
+     *   对 cppdbg 和 cuda-gdb 都自动生效，无需差异化配置。
+     */
+    {
+      "name": "Debug CUDA with cuda-gdb",
+      "type": "cuda-gdb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build/test_radar_cuda",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [],
+      /**
+       * cuda-gdb 可执行文件路径。已在 PATH 中则可省略。
+       */
+      "debuggerPath": "/usr/local/cuda/bin/cuda-gdb",
+      /**
+       * true：在第一个 kernel 启动前自动暂停（仅在 device 侧调试时有用）。
+       * false：依赖用户手动设置的断点。
+       */
+      "breakOnLaunch": false,
+      /**
+       * setupCommands：启动 cuda-gdb 后、程序运行前发送的命令。
+       *
+       * cuda-gdb 基于 GDB 扩展，同样支持 pretty-printing。
+       * 启用后 std::vector<float> 会被展开为 [0], [1], [2] ... 子元素，
+       * 插件的 collectNumericChildren 才能递归采集到数值。
+       * 若不启用，vector 只会显示内部结构（_M_start 等），无法提取数据。
+       */
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for cuda-gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}

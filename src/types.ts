@@ -60,7 +60,7 @@ export interface SignalVariable {
 	name: string;               // 变量名
 	value: string;              // GDB 显示的值（字符串形式）
 	type: string;               // 变量的 C++ 类型
-	variablesReference: number; // DAP 变量引用 ID（用于获取子元素）
+	variablesReference: number; // DAP 变量引用 ID（保留仅供 VSCode 面板/识别用，插件不再主动消耗）
 	children: boolean;          // 是否有子节点（树视图折叠状态）
 }
 

@@ -113,6 +113,33 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 	private currentVariables: SignalVariable[] = [];
 
 	/**
+	 * 最近一次 "stopped" 事件中携带的 threadId。
+	 *
+	 * DAP stopped 事件的 body 形如：
+	 *   { reason: 'breakpoint', threadId: 12345, allThreadsStopped: true, ... }
+	 * threadId 是真正触发这次停止的线程。
+	 *
+	 * 为什么需要保存：
+	 *   - CPU (GDB) 场景：单线程程序里 threads[0] 就是主线程，两者等价。
+	 *   - CUDA (cuda-gdb) 场景：kernel 断点命中时可能有成千上万个 CUDA 线程，
+	 *     threads[0] 几乎一定不是真正停下来的那一个；
+	 *     必须用 stopped 事件里给出的 threadId 才能定位到正确的栈帧和变量。
+	 *
+	 * undefined 表示还没有收到过 stopped 事件，
+	 * updateVariables() 会退化为 threads[0]（兜底）。
+	 */
+	private lastStoppedThreadId: number | undefined;
+
+	/**
+	 * 最近一次栈帧查询拿到的 frameId。
+	 *
+	 * evaluate DAP 请求需要 frameId 来定位“表达式在哪个栈帧的上下文里求值”。
+	 * 在 updateVariables() 已经拿到 frameId 的地方顺手缓存一份，
+	 * getVariableData() 用到时直接读，避免再次发 stackTrace 请求。
+	 */
+	private lastStoppedFrameId: number | undefined;
+
+	/**
 	 * 构造函数，在 extension.ts 中 new SignalDataProvider() 时调用。
 	 * 这里调用 listenToDebugEvents() 注册调试事件监听。
 	 *
@@ -197,7 +224,27 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 				onDidSendMessage: (message: any) => {
 					if (message.type === 'event' && message.event === 'stopped') {
 						this.debugSession = session;
+						/**
+						 * 从 stopped 事件 body 中提取触发断点的 threadId。
+						 *
+						 * 对 CUDA 场景至关重要：一次 kernel 调用会产生大量线程，
+						 * 只有 body.threadId 指向的才是真正命中断点的那个。
+						 *
+						 * 某些适配器可能不提供 body.threadId（极少见），
+						 * 此时保持 undefined，updateVariables() 会退化到 threads[0]。
+						 */
+						const stoppedThreadId = message.body && message.body.threadId;
+						if (typeof stoppedThreadId === 'number') {
+							this.lastStoppedThreadId = stoppedThreadId;
+						}
 						this.updateVariables();
+					} else if (message.type === 'event' && message.event === 'continued') {
+						/**
+						 * 调试器恢复执行时，之前记录的 threadId / frameId 不再有效，清空。
+						 * 下一次 stopped 事件会重新填充。
+						 */
+						this.lastStoppedThreadId = undefined;
+						this.lastStoppedFrameId = undefined;
 					}
 				}
 			})
@@ -224,6 +271,8 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 	clearDebugSession() {
 		this.debugSession = undefined;
 		this.currentVariables = [];
+		this.lastStoppedThreadId = undefined;
+		this.lastStoppedFrameId = undefined;
 		this.refresh();
 	}
 
@@ -256,20 +305,28 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 			 * "threads" 请求不需要参数，返回所有线程的信息。
 			 * 响应格式：{ threads: [{ id: number, name: string }, ...] }
 			 */
-			const threadsResponse = await this.debugSession.customRequest('threads');
-			const threads: { id: number; name: string }[] = threadsResponse.threads || [];
-
-			if (threads.length === 0) {
-				console.log('Radar Signal Visualizer: No threads found');
-				return;
-			}
-
 			/**
-			 * 在单线程程序中，通常只有一个线程（主线程）。
-			 * 在 GPU 调试场景下，可能有多个 CUDA 线程。
-			 * 这里简单取第一个线程，后续可以优化为让用户选择线程。
+			 * 选择要查询的线程 ID。
+			 *
+			 * 优先级：
+			 *   1. lastStoppedThreadId（来自 DAP stopped 事件）——最准确，
+			 *      直接对应用户断点命中的那个线程。
+			 *      在 CUDA 场景下是必须的，kernel 断点时可能有上万线程。
+			 *   2. threads 请求返回的第一个线程——兜底方案，
+			 *      适用于未能捕获到 stopped 事件或手动刷新的情况。
+			 *
+			 * 这里先看有没有缓存的 stopped threadId，若无再发 threads 请求。
 			 */
-			const threadId = threads[0].id;
+			let threadId: number | undefined = this.lastStoppedThreadId;
+			if (threadId === undefined) {
+				const threadsResponse = await this.debugSession.customRequest('threads');
+				const threads: { id: number; name: string }[] = threadsResponse.threads || [];
+				if (threads.length === 0) {
+					console.log('Radar Signal Visualizer: No threads found');
+					return;
+				}
+				threadId = threads[0].id;
+			}
 
 			/**
 			 * 第 2 步：获取调用栈（Stack Trace）。
@@ -302,6 +359,8 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 			 * 后续需要用这个 ID 获取该帧的作用域。
 			 */
 			const frameId = stackTrace.stackFrames[0].id;
+			// 缓存给 getVariableData() 在后续 evaluate 时复用
+			this.lastStoppedFrameId = frameId;
 
 			/**
 			 * 第 3 步：获取栈帧的作用域（Scopes）。
@@ -385,6 +444,11 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 
 			/**
 			 * 刷新树视图：通知 VSCode 数据已变化，重新渲染面板。
+			 *
+			 * 注意：这里不再预取数据。上一版预取会消耗 vector 的 variablesReference，
+			 * 导致用户在 VSCode 自带变量面板里展开 vector 时报错。
+			 * 新策略采用 evaluate + 数组表达式，在 getVariableData() 里按需获取，
+			 * 完全不碰原变量的 ref。
 			 */
 			this.refresh();
 
@@ -519,12 +583,119 @@ export class SignalDataProvider implements vscode.TreeDataProvider<SignalVariabl
 
 		const data: number[] = [];
 
-		if (variable.variablesReference > 0) {
-			try {
-				await this.collectNumericChildren(variable.variablesReference, data);
-			} catch (error) {
-				vscode.window.showErrorMessage(`Failed to get variable data: ${error}`);
+		/**
+		 * 核心策略：DAP evaluate 请求 + GDB 的 @ 人工数组语法。
+		 *
+		 * 为什么不直接用 variable.variablesReference：
+		 * cuda-gdb 下同一 ref 只能请求一次。如果我们消耗了该 ref，
+		 * 用户在 VSCode 自带变量面板里再点展开就会失败。
+		 *
+		 * GDB @ 语法简介：
+		 *   *pointer@count → 把连续的 count 个元素视为一个人工数组。
+		 *   例：对 std::vector<float> v，*v.data()@v.size() 返回一个 float[size] 视图。
+		 *   请求返回的 variablesReference 是此次 evaluate 临时生成的新 ref，
+		 *   与原 vector 的 ref 完全独立，消耗它不影响用户面板的展开。
+		 *
+		 * cuda-gdb 基于 GDB，原生支持此语法。
+		 */
+		try {
+			// 1) 判断是否是 STL 容器（决定使用 .data() 还是直接取地址）
+			const isStlContainer = /vector|array<|deque/.test(variable.type);
+
+			// 2) 获取数组大小。依次尝试三个来源：
+			//    (a) 类型字符串里的 [N]（原生数组 float[256]）
+			//    (b) evaluate("name.size()") 发起 inferior call（STL 容器）
+			//    (c) value 字符串里的 "length N"（gdb 原生 pretty-print）
+			//
+			// 为什么要多路径：cuda-gdb 的 pretty-printer 把 vector value 输出为 "{...}"，
+			// 无法从中提取 size。必须调 .size() 或依赖类型中的常量大小。
+			let size = 0;
+
+			const sizeFromType = variable.type.match(/\[(\d+)\]/);
+			if (sizeFromType) {
+				size = parseInt(sizeFromType[1]);
 			}
+
+			if (size === 0 && isStlContainer) {
+				// (b1) 先试 .size() inferior call
+				try {
+					const sizeResp = await this.debugSession.customRequest('evaluate', {
+						expression: `${variable.name}.size()`,
+						context: 'watch',
+						frameId: this.lastStoppedFrameId
+					});
+					const m = typeof sizeResp.result === 'string' ? sizeResp.result.match(/-?\d+/) : null;
+					const parsed = m ? parseInt(m[0], 10) : NaN;
+					if (!isNaN(parsed) && parsed > 0) {
+						size = parsed;
+					}
+				} catch (err) {
+					console.warn(`Radar Signal Visualizer: ${variable.name}.size() evaluate failed (may be inlined), will try libstdc++ internals`, err);
+				}
+
+				// (b2) fallback：libstdc++ 内部字段指针减法。
+				// 为什么这样可行：_M_impl._M_start 和 _M_finish 是成员字段（非函数），
+				// 读取它们只是内存加载 + 指针算术，不涉及 inferior call，不会报 "may be inlined"。
+				// 适用范围：Linux 下 GNU libstdc++（WSL/Ubuntu 默认）。
+				// libc++ 或 MSVC 的 STL 实现字段名不同，但目标平台主要是 libstdc++。
+				if (size === 0) {
+					try {
+						const diffResp = await this.debugSession.customRequest('evaluate', {
+							expression: `${variable.name}._M_impl._M_finish - ${variable.name}._M_impl._M_start`,
+							context: 'watch',
+							frameId: this.lastStoppedFrameId
+						});
+						const m = typeof diffResp.result === 'string' ? diffResp.result.match(/-?\d+/) : null;
+						const parsed = m ? parseInt(m[0], 10) : NaN;
+						if (!isNaN(parsed) && parsed > 0) {
+							size = parsed;
+							console.log(`Radar Signal Visualizer: size for ${variable.name} via libstdc++ internals: ${size}`);
+						}
+					} catch (err) {
+						console.warn(`Radar Signal Visualizer: libstdc++ internals size failed for ${variable.name}`, err);
+					}
+				}
+			}
+
+			if (size === 0) {
+				const sizeFromValue = variable.value.match(/length\s+(\d+)/);
+				if (sizeFromValue) {
+					size = parseInt(sizeFromValue[1]);
+				}
+			}
+
+			if (size <= 0) {
+				console.warn(`Radar Signal Visualizer: cannot determine size of ${variable.name} from value="${variable.value}" type="${variable.type}"`);
+				return data;
+			}
+
+			// 3) 构造人工数组表达式。
+			//    STL 容器：不能用 .data()（同样是 inline 函数），改用 libstdc++ 字段 _M_impl._M_start。
+			//      该字段本身就是正确类型的数据指针（如 float*）。
+			//    原生数组/指针：*(name)@size 即可。
+			const expression = isStlContainer
+				? `*(${variable.name}._M_impl._M_start)@${size}`
+				: `*(${variable.name})@${size}`;
+
+			console.log(`Radar Signal Visualizer: evaluating "${expression}" (size=${size}) in frame ${this.lastStoppedFrameId}`);
+
+			// 4) 发 evaluate 请求。
+			const evalResp = await this.debugSession.customRequest('evaluate', {
+				expression,
+				context: 'watch',
+				frameId: this.lastStoppedFrameId
+			});
+
+			// 5) 展开 evaluate 返回的新 ref。
+			if (evalResp.variablesReference && evalResp.variablesReference > 0) {
+				await this.collectNumericChildren(evalResp.variablesReference, data);
+				console.log(`Radar Signal Visualizer: evaluate got ${data.length} values for ${variable.name}`);
+			} else {
+				console.warn(`Radar Signal Visualizer: evaluate returned no variablesReference for ${variable.name}, result="${evalResp.result}"`);
+			}
+		} catch (error) {
+			console.error('Radar Signal Visualizer: getVariableData (evaluate) failed', error);
+			vscode.window.showErrorMessage(`Failed to get variable data: ${error}`);
 		}
 
 		return data;
