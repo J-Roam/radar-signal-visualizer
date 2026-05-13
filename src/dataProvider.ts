@@ -36,9 +36,20 @@ const BYTES_PER_ELEMENT: Record<string, number> = {
 	'char': 1, 'int8_t': 1, 'uint8_t': 1, 'unsigned char': 1, 'signed char': 1,
 	'long': 8, 'int64_t': 8, 'uint64_t': 8, 'unsigned long': 8,
 	'long long': 8, 'unsigned long long': 8,
-	'cuFloatComplex': 8, 'std::complex<float>': 8,
-	'cuDoubleComplex': 16, 'std::complex<double>': 16,
+	'cuFloatComplex': 8, 'std::complex<float>': 8, 'float2': 8,
+	'cuDoubleComplex': 16, 'std::complex<double>': 16, 'double2': 16,
 };
+
+/**
+ * 复数元素类型集合，readSignalBytes 及 inferTypeInfo 均会查表。
+ * 注：cuFloatComplex 在 cuComplex.h 中 typedef 为 float2，cuda-gdb 有时会
+ * 展开成 float2；double2 同理。故均需列入。
+ */
+const COMPLEX_ELEMENT_TYPES = new Set<string>([
+	'cuFloatComplex', 'cuDoubleComplex',
+	'std::complex<float>', 'std::complex<double>',
+	'float2', 'double2',
+]);
 
 export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariable> {
 
@@ -127,6 +138,7 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 			containerKind: info.containerKind,
 			elementType: info.elementType,
 			bytesPerElement: info.bytesPerElement,
+			isComplex: info.isComplex,
 			sizeHint,
 		};
 		this.pinned.push(pinned);
@@ -177,6 +189,7 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 		// 保留 pinned 条目，但清掉数据
 		for (const p of this.pinned) {
 			p.lastData = undefined;
+			p.lastDataIm = undefined;
 			p.lastError = 'No active debug session';
 		}
 		this.refresh();
@@ -250,15 +263,38 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 			console.log(`Radar Signal Visualizer: readMemory got ${b64.length} base64 chars (${count} bytes) for ${p.displayName}`);
 			if (!b64) throw new Error('readMemory returned empty data');
 
-			// ---- 4) base64 → DataView → number[] ----
+			// ---- 4) base64 → DataView → number[]；复数拆为 re/im 两路 ----
 			const buf = Buffer.from(b64, 'base64');
 			const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-			const out: number[] = new Array(size);
-			for (let i = 0; i < size; i++) {
-				out[i] = this.decodeOne(view, i * p.bytesPerElement, p.elementType);
+			let outRe: number[];
+			let outIm: number[] | undefined;
+			if (p.isComplex) {
+				outRe = new Array(size);
+				outIm = new Array(size);
+				// 按元素字节数判定单/双精复数：8 表示 float 对（包括 float2/cuFloatComplex/std::complex<float>）
+				const floatComplex = (p.bytesPerElement === 8);
+				if (floatComplex) {
+					for (let i = 0; i < size; i++) {
+						const off = i * p.bytesPerElement;
+						outRe[i] = view.getFloat32(off, true);
+						outIm[i] = view.getFloat32(off + 4, true);
+					}
+				} else { // cuDoubleComplex / std::complex<double>
+					for (let i = 0; i < size; i++) {
+						const off = i * p.bytesPerElement;
+						outRe[i] = view.getFloat64(off, true);
+						outIm[i] = view.getFloat64(off + 8, true);
+					}
+				}
+			} else {
+				outRe = new Array(size);
+				for (let i = 0; i < size; i++) {
+					outRe[i] = this.decodeOne(view, i * p.bytesPerElement, p.elementType);
+				}
 			}
 
-			p.lastData = out;
+			p.lastData = outRe;
+			p.lastDataIm = outIm;
 			p.lastError = undefined;
 			p.lastUpdatedMs = Date.now();
 		} catch (error: any) {
@@ -314,28 +350,35 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 	}
 
 	/**
-	 * 从 C++ 类型文本推断容器种类/元素类型/元素字节数。
-	 *   std::vector<float, ...>     → stl / float / 4
-	 *   std::array<int32_t, 256>    → stl / int32_t / 4 / sizeHint=256（尖括号第二参数）
-	 *   std::deque<double>          → stl / double / 8
-	 *   float [256]                 → array / float / 4 / sizeHint=256
-	 *   float*                      → pointer / float / 4
-	 *   cuFloatComplex*             → pointer / cuFloatComplex / 8
+	 * 从 C++ 类型文本推断容器种类/元素类型/元素字节数/是否复数。
+	 *   std::vector<float, ...>             → stl / float / 4 / real
+	 *   std::vector<std::complex<float>>    → stl / std::complex<float> / 8 / complex
+	 *   std::vector<cuFloatComplex>         → stl / cuFloatComplex / 8 / complex
+	 *   std::array<int32_t, 256>            → stl / int32_t / 4 / sizeHint=256
+	 *   float [256]                         → array / float / 4 / sizeHint=256
+	 *   cuFloatComplex [128]                → array / cuFloatComplex / 8 / sizeHint=128
+	 *   float*                              → pointer / float / 4
+	 *   cuFloatComplex*                     → pointer / cuFloatComplex / 8
+	 *
+	 * 可靠警告：原本用单个正则 [^,>]+? 抽元素类型在遇到 std::complex<...> 这种
+	 * 嵌套尖括号时会刪表达式。现改为按层级计数的 topLevelSplit 策略。
 	 */
-	private inferTypeInfo(type: string): { containerKind: ContainerKind; elementType: string; bytesPerElement: number; sizeHint?: number } {
+	private inferTypeInfo(type: string): { containerKind: ContainerKind; elementType: string; bytesPerElement: number; isComplex: boolean; sizeHint?: number } {
 		const trimmed = type.trim();
 
-		// STL: std::[__cxx11::]vector / array / deque <ElemType[, ...]>
-		const stlMatch = trimmed.match(/std::(?:__\w+::)?(?:vector|array|deque)\s*<\s*([^,>]+?)\s*(?:,\s*(\d+)\s*>|[,>])/);
+		// STL: std::[__cxx11::]vector / array / deque < ... >
+		const stlMatch = trimmed.match(/^std::(?:__\w+::)?(?:vector|array|deque)\s*<\s*([\s\S]+)\s*>\s*$/);
 		if (stlMatch) {
-			const et = this.normalizeElementType(stlMatch[1]);
+			const parts = this.topLevelSplit(stlMatch[1]);
+			const rawEt = parts[0];
+			const et = this.normalizeElementType(rawEt);
 			const bpe = BYTES_PER_ELEMENT[et];
 			if (bpe === undefined) throw new Error(`Unsupported element type "${et}" in STL container`);
-			const out: { containerKind: ContainerKind; elementType: string; bytesPerElement: number; sizeHint?: number } = {
-				containerKind: 'stl', elementType: et, bytesPerElement: bpe,
+			const out: { containerKind: ContainerKind; elementType: string; bytesPerElement: number; isComplex: boolean; sizeHint?: number } = {
+				containerKind: 'stl', elementType: et, bytesPerElement: bpe, isComplex: COMPLEX_ELEMENT_TYPES.has(et),
 			};
-			// std::array<T, N> 第二模板参数是静态 size；不是必须，仅作 hint
-			if (stlMatch[2]) out.sizeHint = parseInt(stlMatch[2], 10);
+			// std::array<T, N>：第二参数为纯数字时作为 sizeHint
+			if (parts.length >= 2 && /^\d+$/.test(parts[1])) out.sizeHint = parseInt(parts[1], 10);
 			return out;
 		}
 
@@ -345,7 +388,7 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 			const et = this.normalizeElementType(arrMatch[1]);
 			const bpe = BYTES_PER_ELEMENT[et];
 			if (bpe === undefined) throw new Error(`Unsupported element type "${et}" in native array`);
-			return { containerKind: 'array', elementType: et, bytesPerElement: bpe, sizeHint: parseInt(arrMatch[2], 10) };
+			return { containerKind: 'array', elementType: et, bytesPerElement: bpe, isComplex: COMPLEX_ELEMENT_TYPES.has(et), sizeHint: parseInt(arrMatch[2], 10) };
 		}
 
 		// 指针 T *
@@ -354,10 +397,30 @@ export class SignalDataProvider implements vscode.TreeDataProvider<PinnedVariabl
 			const et = this.normalizeElementType(ptrMatch[1]);
 			const bpe = BYTES_PER_ELEMENT[et];
 			if (bpe === undefined) throw new Error(`Unsupported element type "${et}" in pointer`);
-			return { containerKind: 'pointer', elementType: et, bytesPerElement: bpe };
+			return { containerKind: 'pointer', elementType: et, bytesPerElement: bpe, isComplex: COMPLEX_ELEMENT_TYPES.has(et) };
 		}
 
 		throw new Error(`Cannot parse variable type: "${type}"`);
+	}
+
+	/**
+	 * 按最外层（depth=0）逗号拆分，支持嵌套尖括号。
+	 * 例："std::complex<float>, std::allocator<std::complex<float>>" →
+	 *      ["std::complex<float>", "std::allocator<std::complex<float>>"]
+	 */
+	private topLevelSplit(inner: string): string[] {
+		const out: string[] = [];
+		let depth = 0;
+		let buf = '';
+		for (let i = 0; i < inner.length; i++) {
+			const ch = inner[i];
+			if (ch === '<') { depth++; buf += ch; }
+			else if (ch === '>') { depth--; buf += ch; }
+			else if (ch === ',' && depth === 0) { out.push(buf.trim()); buf = ''; }
+			else { buf += ch; }
+		}
+		if (buf.trim()) out.push(buf.trim());
+		return out;
 	}
 
 	/** 去除 const/volatile/struct 等修饰，规范为 BYTES_PER_ELEMENT 的键 */

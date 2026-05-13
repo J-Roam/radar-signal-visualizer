@@ -90,45 +90,104 @@ html, body {
 	color: var(--vscode-errorForeground);
 }
 
-.card-tabs {
-	display: flex;
-	gap: 4px;
-	flex: 0 0 auto;
-}
-
-.tab-btn {
-	background: transparent;
-	color: var(--vscode-foreground);
-	border: 1px solid transparent;
-	padding: 3px 10px;
-	font-size: 0.85em;
-	cursor: pointer;
-	border-radius: 3px;
-}
-
-.tab-btn:hover {
-	background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
-}
-
-.tab-btn.active {
-	background: var(--vscode-button-secondaryBackground, rgba(100, 150, 200, 0.15));
-	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
-	border-color: var(--vscode-focusBorder, rgba(100, 150, 200, 0.4));
-}
-
 .card-body {
 	padding: 10px 14px 14px 14px;
+	display: flex;
+	flex-direction: row;
+	gap: 14px;
+	align-items: stretch;
 }
 
-.chart-body {
+/* 左侧 Table 列 */
+.table-side {
+	flex: 0 0 320px;
+	min-width: 240px;
+	max-width: 40%;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-height: 0;
+}
+
+/* 右侧 Chart 列 */
+.chart-side {
 	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+/* 窄屏：堆叠 */
+@media (max-width: 720px) {
+	.card-body { flex-direction: column; }
+	.table-side { flex: 1 1 auto; max-width: 100%; min-width: 0; }
+}
+
+.side-title {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.8em;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+}
+
+.plot-controls {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.plot-kind-label {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+}
+
+.plot-kind-select {
+	background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+	color: var(--vscode-dropdown-foreground, var(--vscode-editor-foreground));
+	border: 1px solid var(--vscode-dropdown-border, var(--vscode-widget-border, rgba(255,255,255,0.15)));
+	border-radius: 3px;
+	padding: 3px 6px;
+	font-size: 0.85em;
+	font-family: var(--vscode-font-family);
+	cursor: pointer;
+	min-width: 200px;
+}
+
+.plot-kind-select:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.plot-area {
+	position: relative;
+	flex: 1 1 auto;
+	min-height: 260px;
 	height: 260px;
 }
 
-.chart-body canvas {
+.plot-area canvas {
 	display: block;
 	width: 100% !important;
 	height: 100% !important;
+}
+
+.plot-placeholder {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	border: 1px dashed var(--vscode-widget-border, rgba(255,255,255,0.15));
+	border-radius: 3px;
+}
+
+.error-body {
+	flex: 1 1 auto;
 }
 
 .error-body {
@@ -145,8 +204,14 @@ html, body {
 
 /* =========== Table =========== */
 
-.table-body {
-	max-height: 320px;
+.table-side > .data-table-wrap,
+.table-side {
+	/* Table 容器本身带边框与滚动 */
+}
+
+.table-side .data-table {
+	display: block;
+	max-height: 260px;
 	overflow-y: auto;
 	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
 	border-radius: 3px;
@@ -157,17 +222,23 @@ html, body {
 	border-collapse: collapse;
 	font-family: var(--vscode-editor-font-family), monospace;
 	font-size: 0.85em;
+	table-layout: fixed;
 }
 
 .data-table thead th {
 	position: sticky;
 	top: 0;
-	background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
+	/* 强制不透明：sideBarSectionHeader-background 在部分主题下带 alpha，
+	   sticky 表头会透出下方行内容形成重叠。此处使用较可靠的
+	   editorWidget-background （带 editor-background 兵底）保障不透明。 */
+	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	background-clip: padding-box;
 	text-align: left;
 	padding: 6px 10px;
-	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.25));
+	box-shadow: inset 0 -1px 0 var(--vscode-widget-border, rgba(255, 255, 255, 0.25));
 	font-weight: 600;
-	z-index: 1;
+	z-index: 2;
 }
 
 .data-table tbody td {

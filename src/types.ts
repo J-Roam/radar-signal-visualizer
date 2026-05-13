@@ -30,9 +30,11 @@ export interface PinnedVariable {
 	type: string;                  // 原始 C++ 类型文本
 	containerKind: ContainerKind;  // 容器种类
 	elementType: string;           // 元素类型，如 float / int32_t / cuFloatComplex
-	bytesPerElement: number;       // 单元素字节数
+	bytesPerElement: number;       // 单元素字节数（复数类型按一个完整复数计，如 cuFloatComplex = 8）
+	isComplex: boolean;            // 元素是否为复数（cuFloatComplex / std::complex<*>）
 	sizeHint?: number;             // 非 stl 必填，stl 在 readSignalBytes 时动态获取
-	lastData?: number[];           // 上一次成功解码的数据，刷新失败时仍可显示
+	lastData?: number[];           // 实数：值；复数：实部 re
+	lastDataIm?: number[];         // 复数：虚部 im（实数时为 undefined）
 	lastError?: string;            // 上一次错误文本，用于卡片错误态
 	lastUpdatedMs?: number;        // 上一次刷新时间戳
 }
@@ -48,7 +50,9 @@ export interface CardPayload {
 	displayName: string; // 标题
 	type: string;        // 副标题元信息
 	elementType: string; // 元素类型文本，用于卡片 meta 行显示
-	data: number[];      // 绘图/表格原始数据；error 态时可为空
+	isComplex: boolean;  // 是否复数；webview 据此决定 plot kind 可用集
+	data: number[];      // 实数：值；复数：实部 re；error 态可为空
+	dataIm?: number[];   // 复数：虚部 im；实数时缺省
 	error?: string;      // 错误文本；非空表示此卡片渲染为错误态
 	pageSize: number;    // Table 每页行数
 }

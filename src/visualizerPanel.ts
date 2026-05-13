@@ -100,7 +100,9 @@ export class SignalVisualizerPanel {
 			displayName: p.displayName,
 			type: p.type,
 			elementType: p.elementType,
+			isComplex: p.isComplex,
 			data: p.lastData ?? [],
+			dataIm: p.lastDataIm,
 			error: p.lastError,
 			pageSize,
 		};
