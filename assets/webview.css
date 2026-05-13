@@ -1,236 +1,201 @@
-/**
- * ======================================================================
- * webview.css - Webview 样式表
- * ======================================================================
- *
- * 本文件定义 Webview 的 CSS 样式。
- *
- * CSS（层叠样式表）用于控制 HTML 元素的视觉外观（颜色、大小、间距、字体等）。
- *
- * 核心特性：VSCode 主题适配
- * VSCode 提供了一系列 CSS 变量（以 --vscode- 开头），
- * 这些变量会根据用户选择的主题（深色、浅色、高对比度等）自动变化。
- *
- * 例如：
- *   var(--vscode-editor-background)  → 深色主题：#1e1e1e
- *                                       浅色主题：#ffffff
- *
- * 使用这些变量而不是硬编码颜色值，确保 Webview 在任何主题下都能正常显示，
- * 与 VSCode 整体外观一致。
- *
- * VSCode 主题变量完整列表：
- *   https://code.visualstudio.com/api/references/theme-color
- *
- * ======================================================================
- */
+/* ======================================================================
+ * webview.css - 多卡片样式
+ * 使用 VSCode 主题变量 var(--vscode-*) 自动跟随深/浅色主题
+ * ====================================================================== */
 
-/**
- * 全局重置（Reset）样式。
- *
- * * 是通配符选择器，匹配所有元素。
- * box-sizing: border-box 让元素的 width/height 包含 padding 和 border，
- * 而不是只包含 content。这样在计算布局时更直观（设置 100px 宽就是 100px 总宽）。
- *
- * margin: 0 和 padding: 0 清除浏览器默认的边距和内边距。
- * 不同浏览器的默认值不同，统一重置为零，避免布局不一致。
- */
-* {
-	box-sizing: border-box;
+html, body {
 	margin: 0;
 	padding: 0;
-}
-
-/**
- * body 是 HTML 页面的根容器，所有其他元素都在它内部。
- *
- * font-family: 字体族列表，按优先级排列。
- * 浏览器会依次尝试使用列表中的字体，直到找到系统可用的。
- * -apple-system → macOS/iOS 系统字体
- * BlinkMacSystemFont → 新版 macOS 字体
- * 'Segoe UI' → Windows 系统字体
- * Roboto → Android 系统字体
- * ...
- * sans-serif → 通用无衬线字体（后备字体）
- *
- * background-color 和 color 使用 VSCode 主题变量，
- * 确保背景色和文字颜色与编辑器一致。
- *
- * height: 100vh 让 body 占据整个视口高度（vh = viewport height）。
- * 100vh = 100% 的浏览器窗口高度。
- *
- * overflow: hidden 禁止滚动条出现。
- * Webview 面板不需要滚动，内容会自动适配面板大小。
- */
-body {
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-	background-color: var(--vscode-editor-background);
+	height: 100%;
+	background: var(--vscode-editor-background);
 	color: var(--vscode-editor-foreground);
-	height: 100vh;
-	overflow: hidden;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
 }
 
-/**
- * .container 是页面的根布局容器（见 webview.js 中的 HTML 结构）。
- *
- * display: flex 启用 Flexbox 布局。
- * Flexbox 是 CSS3 的布局模式，用于在一维方向（水平或垂直）排列子元素。
- *
- * flex-direction: column 表示纵向排列（从上到下）。
- * 子元素顺序：header → chart-container → controls。
- *
- * height: 100% 继承 body 的高度（100vh），占据整个视口。
- *
- * padding: 16px 在容器四周添加 16 像素的内边距（内容与边框的距离）。
- * 避免内容贴边，增加呼吸感。
- */
 .container {
 	display: flex;
 	flex-direction: column;
-	height: 100%;
 	padding: 16px;
+	box-sizing: border-box;
+	min-height: 100%;
 }
 
-/**
- * .header 包含标题和信号信息。
- *
- * margin-bottom: 16px 在下方添加外边距（与其他元素的距离）。
- * 保持与 container 的 padding 一致，视觉统一。
- */
 .header {
-	margin-bottom: 16px;
+	margin-bottom: 12px;
 }
 
-/**
- * .header h1 是页面主标题。
- *
- * font-size: 20px 字体大小。
- * font-weight: 600 字体粗细（600 = semi-bold，半粗体）。
- * margin-bottom: 8px 标题下方间距。
- * color 使用 VSCode 主题的前景色。
- */
 .header h1 {
-	font-size: 20px;
-	font-weight: 600;
-	margin-bottom: 8px;
-	color: var(--vscode-editor-foreground);
-}
-
-/**
- * .signal-info 显示当前可视化的信号变量信息。
- *
- * font-size: 12px 小字体（辅助信息不需要太显眼）。
- * color 使用描述性前景色（灰色），比主文字淡。
- *
- * min-height: 20px 最小高度。
- * 即使内容为空，也保留 20px 高度，避免布局抖动
- * （有内容时 20px，无内容时 0px，会导致下方元素跳动）。
- */
-.signal-info {
-	font-size: 12px;
-	color: var(--vscode-descriptionForeground);
-	min-height: 20px;
-}
-
-/**
- * .chart-container 是图表的容器。
- *
- * flex: 1 是 Flexbox 的关键属性。
- * 在纵向 Flexbox 中，这表示"占据剩余的所有空间"。
- * header 和 controls 的高度是固定的（由内容决定），
- * chart-container 自动填满中间的空隙。
- *
- * position: relative 相对定位。
- * Chart.js 需要这个属性来正确计算图表尺寸。
- *
- * background-color 和 border 使用 VSCode 主题变量。
- *
- * border-radius: 4px 圆角。
- * 让容器的四个角有 4 像素的弧度，视觉效果更柔和。
- *
- * padding: 16px 内部间距，图表不贴边。
- * margin-bottom: 16px 与下方 controls 的间距。
- */
-.chart-container {
-	flex: 1;
-	position: relative;
-	background-color: var(--vscode-editor-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 4px;
-	padding: 16px;
-	margin-bottom: 16px;
-}
-
-/**
- * #signalChart 是 <canvas> 元素（Chart.js 的绘图区域）。
- *
- * id 选择器（#）比类选择器（.）优先级更高，用于唯一元素。
- *
- * width: 100% 和 height: 100% 让 Canvas 填满父容器。
- * 配合 .chart-container 的 flex: 1，图表会自适应面板大小。
- */
-#signalChart {
-	width: 100%;
-	height: 100%;
-}
-
-/**
- * .controls 是底部的统计信息面板。
- *
- * display: flex 横向排列子元素（.stat）。
- * gap: 24px 子元素之间的间距（24 像素）。
- * padding: 12px 内部间距。
- * background-color 和 border 使用 VSCode 面板主题变量。
- * border-radius: 4px 圆角。
- */
-.controls {
-	display: flex;
-	gap: 24px;
-	padding: 12px;
-	background-color: var(--vscode-panel-background);
-	border: 1px solid var(--vscode-panel-border);
-	border-radius: 4px;
-}
-
-/**
- * .stat 是单个统计项（如 "Samples: 256"）。
- *
- * display: flex 横向排列 label 和 value。
- * align-items: center 垂直居中对齐（文字高度不同也能对齐）。
- * gap: 8px label 和 value 之间的间距。
- */
-.stat {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-/**
- * .stat .label 是统计项的标签（如 "Samples:"、"Min:"）。
- *
- * font-size: 12px 小字体。
- * font-weight: 500 中等粗细。
- * color 使用描述性前景色（灰色）。
- */
-.stat .label {
-	font-size: 12px;
+	margin: 0 0 4px 0;
+	font-size: 1.2em;
 	font-weight: 500;
-	color: var(--vscode-descriptionForeground);
+	color: var(--vscode-editor-foreground);
 }
 
-/**
- * .stat span:last-child 是统计项的数值（如 "256"、"-0.123456"）。
- *
- * :last-child 伪类选择器，匹配 .stat 内的最后一个 <span>（即数值）。
- *
- * font-size: 14px 比标签稍大，突出显示。
- * font-weight: 600 粗体，进一步强调。
- * color 使用主前景色（与标题一致）。
- * font-family: 'Consolas', 'Monaco', monospace 使用等宽字体。
- * 等宽字体的每个字符宽度相同，数字对齐更整齐，适合显示数据。
- */
-.stat span:last-child {
-	font-size: 14px;
+.header .hint {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.9em;
+}
+
+.empty-hint {
+	color: var(--vscode-descriptionForeground);
+	font-style: italic;
+	padding: 24px 0;
+	text-align: center;
+	display: none;
+}
+
+/* =========== 卡片 =========== */
+
+.cards-root {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.card {
+	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.1));
+	border-radius: 6px;
+	background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+	overflow: hidden;
+}
+
+.card-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 16px;
+	padding: 10px 14px;
+	background: var(--vscode-sideBarSectionHeader-background, transparent);
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+}
+
+.card-title {
 	font-weight: 600;
-	color: var(--vscode-editor-foreground);
-	font-family: 'Consolas', 'Monaco', monospace;
+	font-size: 1em;
+	flex: 0 1 auto;
+}
+
+.card-meta {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+	font-family: var(--vscode-editor-font-family), monospace;
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.card-meta.error {
+	color: var(--vscode-errorForeground);
+}
+
+.card-tabs {
+	display: flex;
+	gap: 4px;
+	flex: 0 0 auto;
+}
+
+.tab-btn {
+	background: transparent;
+	color: var(--vscode-foreground);
+	border: 1px solid transparent;
+	padding: 3px 10px;
+	font-size: 0.85em;
+	cursor: pointer;
+	border-radius: 3px;
+}
+
+.tab-btn:hover {
+	background: var(--vscode-toolbar-hoverBackground, rgba(255,255,255,0.08));
+}
+
+.tab-btn.active {
+	background: var(--vscode-button-secondaryBackground, rgba(100, 150, 200, 0.15));
+	color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+	border-color: var(--vscode-focusBorder, rgba(100, 150, 200, 0.4));
+}
+
+.card-body {
+	padding: 10px 14px 14px 14px;
+}
+
+.chart-body {
+	position: relative;
+	height: 260px;
+}
+
+.chart-body canvas {
+	display: block;
+	width: 100% !important;
+	height: 100% !important;
+}
+
+.error-body {
+	color: var(--vscode-errorForeground);
+	background: var(--vscode-inputValidation-errorBackground, rgba(200, 80, 80, 0.1));
+	border: 1px solid var(--vscode-inputValidation-errorBorder, rgba(200, 80, 80, 0.3));
+	border-radius: 3px;
+	padding: 8px 12px;
+	font-family: var(--vscode-editor-font-family), monospace;
+	font-size: 0.85em;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* =========== Table =========== */
+
+.table-body {
+	max-height: 320px;
+	overflow-y: auto;
+	border: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.08));
+	border-radius: 3px;
+}
+
+.data-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-family: var(--vscode-editor-font-family), monospace;
+	font-size: 0.85em;
+}
+
+.data-table thead th {
+	position: sticky;
+	top: 0;
+	background: var(--vscode-sideBarSectionHeader-background, var(--vscode-editorWidget-background));
+	text-align: left;
+	padding: 6px 10px;
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.12));
+	font-weight: 600;
+	z-index: 1;
+}
+
+.data-table tbody td {
+	padding: 4px 10px;
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(255, 255, 255, 0.04));
+}
+
+.data-table tbody tr:nth-child(odd) {
+	background: var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.02));
+}
+
+.data-table .col-idx {
+	color: var(--vscode-descriptionForeground);
+	width: 80px;
+}
+
+.show-more-btn {
+	display: inline-block;
+	margin: 8px 0 0 0;
+	padding: 4px 12px;
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 0.85em;
+}
+
+.show-more-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
 }
