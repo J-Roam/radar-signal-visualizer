@@ -44,21 +44,22 @@
  * ======================================================================
  */
 
+#include <cuComplex.h>
+#include <cuda_runtime.h>
+
 #include <cmath>
 #include <cstdio>
-#include <cuda_runtime.h>
-#include <cuComplex.h>
 #include <iostream>
 #include <vector>
 
-#define CUDA_CHECK(call)                                                          \
-    do {                                                                          \
-        cudaError_t err__ = (call);                                               \
-        if (err__ != cudaSuccess) {                                               \
-            std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << " - " \
-                      << cudaGetErrorString(err__) << std::endl;                  \
-            std::exit(1);                                                         \
-        }                                                                         \
+#define CUDA_CHECK(call)                                                                                       \
+    do {                                                                                                       \
+        cudaError_t err__ = (call);                                                                            \
+        if (err__ != cudaSuccess) {                                                                            \
+            std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << " - " << cudaGetErrorString(err__) \
+                      << std::endl;                                                                            \
+            std::exit(1);                                                                                      \
+        }                                                                                                      \
     } while (0)
 
 constexpr float PI = 3.14159265358979323846f;
@@ -88,28 +89,28 @@ __global__ void generateLfmChirpKernel(cuFloatComplex* signal, int N, float fs, 
 
 int main() {
     // ---------------- 正弦信号参数 ----------------
-    const int   SINE_N  = 512;
-    const float SINE_FS = 1000.0f;   // 1 kHz 采样率
-    const float SINE_F  = 50.0f;     // 50 Hz
-    const float SINE_A  = 1.0f;
+    const int SINE_N = 512;
+    const float SINE_FS = 1000.0f;  // 1 kHz 采样率
+    const float SINE_F = 50.0f;     // 50 Hz
+    const float SINE_A = 1.0f;
 
     // ---------------- LFM 复数信号参数 ----------------
-    const int   LFM_N  = 512;
-    const float LFM_FS = 10.0e6f;              // 10 MHz 采样率
-    const float LFM_BW = 5.0e6f;               // 5 MHz 带宽
-    const float LFM_T  = static_cast<float>(LFM_N) / LFM_FS;  // ≈ 51.2 us
-    const float LFM_K  = LFM_BW / LFM_T;       // 调频斜率
-    const float LFM_F0 = -LFM_BW / 2.0f;       // 起始频率（中心零频）
+    const int LFM_N = 512;
+    const float LFM_FS = 10.0e6f;                            // 10 MHz 采样率
+    const float LFM_BW = 5.0e6f;                             // 5 MHz 带宽
+    const float LFM_T = static_cast<float>(LFM_N) / LFM_FS;  // ≈ 51.2 us
+    const float LFM_K = LFM_BW / LFM_T;                      // 调频斜率
+    const float LFM_F0 = -LFM_BW / 2.0f;                     // 起始频率（中心零频）
 
     // ---------------- Host 可视化目标 ----------------
-    std::vector<float>          sine_signal(SINE_N);
+    std::vector<float> sine_signal(SINE_N);
     std::vector<cuFloatComplex> lfm_signal(LFM_N);
 
     // ---------------- Device 缓冲区 ----------------
-    float*          d_sine = nullptr;
-    cuFloatComplex* d_lfm  = nullptr;
+    float* d_sine = nullptr;
+    cuFloatComplex* d_lfm = nullptr;
     CUDA_CHECK(cudaMalloc(&d_sine, SINE_N * sizeof(float)));
-    CUDA_CHECK(cudaMalloc(&d_lfm,  LFM_N  * sizeof(cuFloatComplex)));
+    CUDA_CHECK(cudaMalloc(&d_lfm, LFM_N * sizeof(cuFloatComplex)));
 
     // ---------------- Kernel 启动 ----------------
     const int BLOCK = 128;
@@ -118,18 +119,19 @@ int main() {
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // ---------------- 拷回 host ----------------
-    CUDA_CHECK(cudaMemcpy(sine_signal.data(), d_sine, SINE_N * sizeof(float),          cudaMemcpyDeviceToHost));
-    CUDA_CHECK(cudaMemcpy(lfm_signal.data(),  d_lfm,  LFM_N  * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(sine_signal.data(), d_sine, SINE_N * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(lfm_signal.data(), d_lfm, LFM_N * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
+
+    float* sine = sine_signal.data();
 
     // ======================================================
     // <<< 推荐断点：下一行 std::cout
     //     此时 sine_signal 与 lfm_signal 均已填充数据，
     //     可在 Variables 面板右键 Pin 到插件进行可视化验证。
     // ======================================================
-    std::cout << "Sine : N=" << SINE_N << " fs=" << SINE_FS << "Hz freq=" << SINE_F
-              << "Hz amp=" << SINE_A << std::endl;
-    std::cout << "LFM  : N=" << LFM_N  << " fs=" << LFM_FS  << "Hz BW="   << LFM_BW
-              << "Hz f0=" << LFM_F0 << "Hz k=" << LFM_K << "Hz/s" << std::endl;
+    std::cout << "Sine : N=" << SINE_N << " fs=" << SINE_FS << "Hz freq=" << SINE_F << "Hz amp=" << SINE_A << std::endl;
+    std::cout << "LFM  : N=" << LFM_N << " fs=" << LFM_FS << "Hz BW=" << LFM_BW << "Hz f0=" << LFM_F0
+              << "Hz k=" << LFM_K << "Hz/s" << std::endl;
 
     std::cout << "sine_signal[0..4]: ";
     for (int i = 0; i < 5; ++i) std::cout << sine_signal[i] << " ";

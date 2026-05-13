@@ -161,17 +161,95 @@ html, body {
 	outline-offset: -1px;
 }
 
+/* Length 有效长度控制 */
+.length-label {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+	margin-left: 6px;
+}
+
+.length-input {
+	width: 72px;
+	background: var(--vscode-input-background, var(--vscode-editor-background));
+	color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
+	border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(255,255,255,0.15)));
+	border-radius: 3px;
+	padding: 3px 6px;
+	font-size: 0.85em;
+	font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.length-input:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.length-total {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.82em;
+	font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.length-reset-btn {
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	padding: 2px 8px;
+	font-size: 0.8em;
+	cursor: pointer;
+}
+
+.length-reset-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
 .plot-area {
 	position: relative;
 	flex: 1 1 auto;
-	min-height: 260px;
-	height: 260px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
 }
 
-.plot-area canvas {
+/* 每个 sub-plot 使用固定高度，内部 canvas 填满 */
+.sub-plot {
+	position: relative;
+	width: 100%;
+}
+
+.sub-plot canvas {
 	display: block;
 	width: 100% !important;
 	height: 100% !important;
+}
+
+.main-plot        { min-height: 240px; height: 240px; }
+.spectrum-plot    { min-height: 170px; height: 170px; }
+.spectrogram-plot { min-height: 190px; height: 190px; }
+
+/* 时频图：像素缓冲由 JS 动态设定，CSS 拉伸时保持像素清晰 */
+.spectrogram-plot canvas {
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.08));
+	border-radius: 3px;
+}
+
+/* 子面板标题浮于右上角 */
+.sub-plot-title {
+	position: absolute;
+	top: 4px;
+	right: 10px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.72em;
+	letter-spacing: 0.04em;
+	background: var(--vscode-editorWidget-background, rgba(0,0,0,0.3));
+	padding: 1px 6px;
+	border-radius: 3px;
+	pointer-events: none;
+	z-index: 1;
 }
 
 .plot-placeholder {
