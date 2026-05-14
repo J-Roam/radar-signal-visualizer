@@ -142,6 +142,28 @@
 				return { charts };
 			},
 		},
+		// 2D 热力图：一维数组按 rows × cols 行主序展开，颜色 = 模值（复数）或原值（实数）
+		// 实数/复数都可用，需要用户手动在 controls 栏指定 Rows/Cols。
+		'heatmap-2d': {
+			label: '2D Heatmap (|·| intensity)',
+			available: () => true,
+			render(ctx) {
+				const { main } = ctx.canvases;
+				const N = ctx.data.length;
+				const rows = ctx.rows | 0;
+				const cols = ctx.cols | 0;
+				if (rows < 1 || cols < 1) {
+					drawCanvasMessage(main, 'Set Rows & Cols ≥ 1 in controls above');
+					return { charts: [] };
+				}
+				if (rows * cols > N) {
+					drawCanvasMessage(main, `Rows × Cols = ${rows}×${cols} = ${rows * cols} > data length ${N}`);
+					return { charts: [] };
+				}
+				const meta = renderHeatmapCanvas(main, ctx.data, ctx.dataIm || null, rows, cols, !!ctx.isComplex);
+				return { charts: [], heatmapMeta: meta };
+			},
+		},
 	};
 
 	/** 根据数据上下文挑默认 plot kind */
@@ -268,8 +290,16 @@
 		clearTableDom(tableSide);
 		renderTablePage(entry);
 
-		// Chart：始终重绘（destroy 由 buildOrRebuildChart 内部处理）
-		buildOrRebuildChart(entry);
+		// Chart：手动确认绘图模式下，数据刷新后**不**自动重绘。
+		// 旧图基于旧数据，必须清除；同时重置 heatmap meta，按当前 plotKind 同步 UI。
+		destroyCharts(entry);
+		clearMainCanvas(entry);
+		entry.heatmapData = null;
+		if (entry.heatmapTitle) entry.heatmapTitle.style.display = 'none';
+		hideHeatmapTooltip(entry);
+		syncPlotControlsUI(entry);
+		const placeholder = entry.root.querySelector('.plot-placeholder');
+		showPlaceholder(entry, placeholder, 'Data updated · click “📊 Plot” to render');
 	}
 
 	function createCardDom(payload) {
@@ -285,7 +315,10 @@
 			<div class="card-body">
 				<div class="error-body" style="display:none"></div>
 				<div class="table-side">
-					<div class="side-title">Table</div>
+					<div class="side-title">
+						<span>Table</span>
+						<button class="export-bin-btn" title="Export current variable as raw .bin (length = effective length)">💾 Export .bin</button>
+					</div>
 					<table class="data-table">
 						<thead></thead>
 						<tbody></tbody>
@@ -300,10 +333,19 @@
 						<input type="number" class="length-input" min="1" step="1" />
 						<span class="length-total"></span>
 						<button class="length-reset-btn" title="Reset to full length">Full</button>
+						<span class="heatmap-controls">
+							<label>Rows</label>
+							<input type="number" class="rows-input" min="1" step="1" />
+							<label>× Cols</label>
+							<input type="number" class="cols-input" min="1" step="1" />
+						</span>
+						<button class="apply-plot-btn" title="Apply current plot parameters">📊 Plot</button>
 					</div>
 					<div class="plot-area">
 						<div class="sub-plot main-plot">
 							<canvas class="main-canvas"></canvas>
+							<div class="sub-plot-title heatmap-title" style="display:none"></div>
+							<div class="heatmap-tooltip"></div>
 						</div>
 						<div class="sub-plot spectrum-plot" style="display:none">
 							<div class="sub-plot-title">Spectrum · |X(f)| / max</div>
@@ -329,6 +371,11 @@
 		const lengthInput       = el.querySelector('.length-input');
 		const lengthTotal       = el.querySelector('.length-total');
 		const lengthResetBtn    = el.querySelector('.length-reset-btn');
+		const heatmapCtrl       = el.querySelector('.heatmap-controls');
+		const rowsInput         = el.querySelector('.rows-input');
+		const colsInput         = el.querySelector('.cols-input');
+		const heatmapTooltip    = el.querySelector('.heatmap-tooltip');
+		const heatmapTitle      = el.querySelector('.heatmap-title');
 		const entry = {
 			root: el,
 			canvases:  { main: mainCanvas, spectrum: spectrumCanvas, spectrogram: spectrogramCanvas },
@@ -336,11 +383,19 @@
 			select,
 			lengthInput,
 			lengthTotal,
+			heatmapCtrl,
+			rowsInput,
+			colsInput,
+			heatmapTooltip,
+			heatmapTitle,
+			heatmapData: null,      // {rows, cols, isComplex, raw, im, vmin, vmax}
 			charts: [],            // Chart.js 实例数组（spectrogram 非 Chart.js，不在此列）
 			data: [],
 			dataIm: undefined,
 			length: 0,              // 有效长度
 			userLengthSet: false,   // 用户是否手动改过 Length
+			rows: 0,                // heatmap-2d 用：行数，0 = 未初始化
+			cols: 0,                // heatmap-2d 用：列数
 			tableRendered: 0,
 			pageSize: payload.pageSize || 200,
 			plotKind: pickDefaultPlotKind(isComplex),
@@ -358,6 +413,14 @@
 			if (e.key === 'Enter') onLengthChange(entry, lengthInput.value);
 		});
 		lengthResetBtn.addEventListener('click', () => onLengthReset(entry));
+		rowsInput.addEventListener('change', () => onHeatmapDimChange(entry));
+		rowsInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') onHeatmapDimChange(entry); });
+		colsInput.addEventListener('change', () => onHeatmapDimChange(entry));
+		colsInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') onHeatmapDimChange(entry); });
+		mainCanvas.addEventListener('mousemove', (e) => onHeatmapHover(entry, e));
+		mainCanvas.addEventListener('mouseleave', () => hideHeatmapTooltip(entry));
+		el.querySelector('.apply-plot-btn').addEventListener('click', () => buildOrRebuildChart(entry));
+		el.querySelector('.export-bin-btn').addEventListener('click', () => onExportBin(entry));
 		el.querySelector('.show-more-btn').addEventListener('click', () => renderTablePage(entry));
 
 		return entry;
@@ -390,7 +453,8 @@
 
 	function onPlotKindChange(entry, kind) {
 		entry.plotKind = kind;
-		buildOrRebuildChart(entry);
+		// 手动确认模式：只切换控件 UI（heatmap controls / canvas 像素拉伸），不实际重绘
+		syncPlotControlsUI(entry);
 	}
 
 	// ================================================================
@@ -430,7 +494,65 @@
 		entry.tableRendered = 0;
 		clearTableDom(entry.root.querySelector('.table-side'));
 		renderTablePage(entry);
-		buildOrRebuildChart(entry);
+		// 手动确认模式：长度变化后不自动重绘，需点击 “📊 Plot”
+		// 仅同步 heatmap 输入框上限，避免与新 length 不一致
+		if (entry.plotKind === 'heatmap-2d') ensureHeatmapDims(entry);
+	}
+
+	// ================================================================
+	// Heatmap 2D 维度控制（rows / cols）
+	// ================================================================
+
+	/** 初始化或校正 entry.rows / entry.cols，同步到输入框。仅为 heatmap-2d 使用。*/
+	function ensureHeatmapDims(entry) {
+		const N = entry.length | 0;
+		if (N <= 0) { entry.rows = 0; entry.cols = 0; }
+		else if (entry.rows < 1 || entry.cols < 1) {
+			// 默认：1 行 × N 列（退化为一维条）
+			entry.rows = 1;
+			entry.cols = N;
+		}
+		if (entry.rowsInput) {
+			entry.rowsInput.value = String(entry.rows || 0);
+			entry.rowsInput.max   = String(Math.max(1, N));
+		}
+		if (entry.colsInput) {
+			entry.colsInput.value = String(entry.cols || 0);
+			entry.colsInput.max   = String(Math.max(1, N));
+		}
+	}
+
+	function onHeatmapDimChange(entry) {
+		const N = entry.length | 0;
+		let r = parseInt(entry.rowsInput.value, 10);
+		let c = parseInt(entry.colsInput.value, 10);
+		if (!Number.isFinite(r) || r < 1) r = 1;
+		if (!Number.isFinite(c) || c < 1) c = 1;
+		if (r > N) r = N;
+		if (c > N) c = N;
+		entry.rows = r;
+		entry.cols = c;
+		ensureHeatmapDims(entry);
+		// 手动确认模式：Rows/Cols 变动后不自动重绘，需点击 “📊 Plot”
+	}
+
+	// ================================================================
+	// 数据导出为 .bin
+	// ================================================================
+
+	/** 向 extension 发送导出请求。数据本体由 extension 从 dataProvider 中取，
+	 *  避免通过 postMessage 传输大数组。webview 只传 id + 有效长度。 */
+	function onExportBin(entry) {
+		const id = entry.root.dataset.id;
+		if (!id) return;
+		const N = entry.data ? entry.data.length : 0;
+		if (N <= 0) return;
+		const eff = Math.max(1, Math.min(entry.length || N, N));
+		vscode.postMessage({
+			command: 'exportBin',
+			id,
+			length: eff,
+		});
 	}
 
 	/**
@@ -461,12 +583,16 @@
 
 		const spec = PLOT_KINDS[entry.plotKind];
 		const placeholder = entry.root.querySelector('.plot-placeholder');
+		const isHeatmap = entry.plotKind === 'heatmap-2d';
 
 		// 重置子面板：默认只显示主图，频谱 / 时频图隐藏
 		entry.subPanels.main.style.display        = 'flex';
 		entry.subPanels.spectrum.style.display    = 'none';
 		entry.subPanels.spectrogram.style.display = 'none';
 		placeholder.style.display                 = 'none';
+
+		// 切控件 UI（heatmap controls / canvas .heatmap class / rows-cols 输入同步）
+		syncPlotControlsUI(entry);
 
 		// 按用户有效长度截断
 		const eff = entry.length;
@@ -481,6 +607,8 @@
 			dataIm: effIm,
 			canvases: entry.canvases,
 			subPanels: entry.subPanels,
+			rows: entry.rows,
+			cols: entry.cols,
 		};
 
 		if (!spec) { showPlaceholder(entry, placeholder, 'Unknown plot kind'); return; }
@@ -493,6 +621,37 @@
 		entry.charts = Array.isArray(result)
 			? result
 			: (result && Array.isArray(result.charts) ? result.charts : [result]);
+
+		// heatmap meta 同步与右上角维度标示
+		if (isHeatmap && result && result.heatmapMeta) {
+			entry.heatmapData = result.heatmapMeta;
+			if (entry.heatmapTitle) {
+				entry.heatmapTitle.textContent = `${result.heatmapMeta.rows} × ${result.heatmapMeta.cols} (rows × cols)`;
+				entry.heatmapTitle.style.display = 'block';
+			}
+		} else {
+			entry.heatmapData = null;
+			if (entry.heatmapTitle) entry.heatmapTitle.style.display = 'none';
+			hideHeatmapTooltip(entry);
+		}
+	}
+
+	/** 只切控件 UI（不实际重绘）：heatmap controls 显隐 + main canvas .heatmap class + Rows/Cols 输入同步 */
+	function syncPlotControlsUI(entry) {
+		const isHeatmap = entry.plotKind === 'heatmap-2d';
+		if (entry.heatmapCtrl) entry.heatmapCtrl.classList.toggle('active', isHeatmap);
+		if (entry.subPanels && entry.subPanels.main) {
+			entry.subPanels.main.classList.toggle('heatmap', isHeatmap);
+		}
+		if (isHeatmap) ensureHeatmapDims(entry);
+	}
+
+	/** 清空 main canvas 上的旧热力图 / 提示文本，避免过期内容残留 */
+	function clearMainCanvas(entry) {
+		const c = entry.canvases && entry.canvases.main;
+		if (!c) return;
+		const ctx2d = c.getContext('2d');
+		if (ctx2d) ctx2d.clearRect(0, 0, c.width, c.height);
 	}
 
 	/** 清空当前卡片上所有 Chart.js 实例（spectrogram 非 Chart.js，无需 destroy） */
@@ -736,6 +895,141 @@
 			}
 		}
 		canvasCtx.putImageData(imageData, 0, 0);
+	}
+
+	/**
+	 * 2D 热力图：将一维数组按行主序（row_i * cols + col_j）展开为 rows×cols 的矩阵，
+	 * 每个元素按值映射到 viridis 调色板。
+	 *   • 复数：v_ij = sqrt(re_k² + im_k²)（k = i*cols + j）
+	 *   • 实数：v_ij = src_k 直接使用（可能为负）
+	 *   • 归一化：(v - vmin) / (vmax - vmin)，vmin==vmax 时整片填色 0
+	 * canvas 像素尺寸正好 = cols × rows，CSS 会按 pixelated 拉伸到面板大小。
+	 */
+	function renderHeatmapCanvas(canvas, srcRe, srcIm, rows, cols, isComplex) {
+		const total = rows * cols;
+		// raw 保持原始值供 tooltip 读取（复数下 raw=re，im 单独缓存）
+		const raw = new Float64Array(total);
+		const im  = isComplex ? new Float64Array(total) : null;
+		const mag = new Float64Array(total);
+		let vmin = Infinity, vmax = -Infinity;
+		if (isComplex) {
+			for (let i = 0; i < total; i++) {
+				const r = srcRe[i] || 0;
+				const q = (srcIm && srcIm[i]) || 0;
+				raw[i] = r;
+				im[i]  = q;
+				const m = Math.sqrt(r * r + q * q);
+				mag[i] = m;
+				if (m < vmin) vmin = m;
+				if (m > vmax) vmax = m;
+			}
+		} else {
+			for (let i = 0; i < total; i++) {
+				const v = srcRe[i] || 0;
+				raw[i] = v;
+				mag[i] = v;
+				if (v < vmin) vmin = v;
+				if (v > vmax) vmax = v;
+			}
+		}
+		const span = vmax - vmin;
+		const inv = span > 0 ? (1 / span) : 0;
+		canvas.width = cols;
+		canvas.height = rows;
+		const ctx2d = canvas.getContext('2d');
+		const imageData = ctx2d.createImageData(cols, rows);
+		const px = imageData.data;
+		for (let r = 0; r < rows; r++) {
+			const rowBase = r * cols;
+			for (let c = 0; c < cols; c++) {
+				const v = span > 0 ? (mag[rowBase + c] - vmin) * inv : 0;
+				const rgb = viridisColor(v);
+				const pIdx = (rowBase + c) * 4;
+				px[pIdx]     = rgb[0];
+				px[pIdx + 1] = rgb[1];
+				px[pIdx + 2] = rgb[2];
+				px[pIdx + 3] = 255;
+			}
+		}
+		ctx2d.putImageData(imageData, 0, 0);
+		return { rows, cols, isComplex, raw, im, vmin, vmax };
+	}
+
+	// ================================================================
+	// Heatmap 鼠标悬停 tooltip：显示 row / col / value
+	// ================================================================
+
+	function onHeatmapHover(entry, ev) {
+		if (entry.plotKind !== 'heatmap-2d') return;
+		const meta = entry.heatmapData;
+		if (!meta || !meta.rows || !meta.cols) { hideHeatmapTooltip(entry); return; }
+		const canvas = entry.canvases.main;
+		const rect = canvas.getBoundingClientRect();
+		if (rect.width <= 0 || rect.height <= 0) return;
+		const x = ev.clientX - rect.left;
+		const y = ev.clientY - rect.top;
+		let col = Math.floor((x / rect.width)  * meta.cols);
+		let row = Math.floor((y / rect.height) * meta.rows);
+		if (col < 0) col = 0; if (col >= meta.cols) col = meta.cols - 1;
+		if (row < 0) row = 0; if (row >= meta.rows) row = meta.rows - 1;
+		const idx = row * meta.cols + col;
+		let valText;
+		if (meta.isComplex) {
+			const re = meta.raw[idx];
+			const qi = (meta.im && meta.im[idx]) || 0;
+			const m  = Math.sqrt(re * re + qi * qi);
+			valText = `|z|=${formatNumber(m)}\nre=${formatNumber(re)}  im=${formatNumber(qi)}`;
+		} else {
+			valText = `value=${formatNumber(meta.raw[idx])}`;
+		}
+		const tip = entry.heatmapTooltip;
+		if (!tip) return;
+		tip.textContent = `row=${row}  col=${col}\n${valText}`;
+		tip.style.whiteSpace = 'pre';
+		tip.classList.add('active');
+		// 定位：相对于 .main-plot 容器
+		const host = entry.subPanels.main;
+		const hostRect = host.getBoundingClientRect();
+		let tx = ev.clientX - hostRect.left + 12;
+		let ty = ev.clientY - hostRect.top  + 12;
+		// 防超边：右 / 下超出时跳到鼠标左上侧
+		const tipW = tip.offsetWidth  || 140;
+		const tipH = tip.offsetHeight || 40;
+		if (tx + tipW > hostRect.width)  tx = ev.clientX - hostRect.left - tipW - 12;
+		if (ty + tipH > hostRect.height) ty = ev.clientY - hostRect.top  - tipH - 12;
+		if (tx < 0) tx = 0;
+		if (ty < 0) ty = 0;
+		tip.style.left = `${tx}px`;
+		tip.style.top  = `${ty}px`;
+	}
+
+	function hideHeatmapTooltip(entry) {
+		if (entry && entry.heatmapTooltip) entry.heatmapTooltip.classList.remove('active');
+	}
+
+	/** 数值格式化：极小或极大用科学计数法，其余保留 4 位小数 */
+	function formatNumber(v) {
+		if (!Number.isFinite(v)) return String(v);
+		if (v === 0) return '0';
+		const a = Math.abs(v);
+		if (a < 1e-3 || a >= 1e6) return v.toExponential(3);
+		return v.toFixed(4);
+	}
+
+	/** 在 canvas 上居中绘制一段红色提示文本（用于 heatmap 参数无效时） */
+	function drawCanvasMessage(canvas, text) {
+		const dpr = window.devicePixelRatio || 1;
+		const cssW = canvas.clientWidth  || 400;
+		const cssH = canvas.clientHeight || 200;
+		canvas.width  = Math.max(1, Math.floor(cssW * dpr));
+		canvas.height = Math.max(1, Math.floor(cssH * dpr));
+		const ctx2d = canvas.getContext('2d');
+		ctx2d.clearRect(0, 0, canvas.width, canvas.height);
+		ctx2d.fillStyle = 'rgba(220, 80, 80, 0.9)';
+		ctx2d.font = `${Math.round(14 * dpr)}px sans-serif`;
+		ctx2d.textAlign = 'center';
+		ctx2d.textBaseline = 'middle';
+		ctx2d.fillText(text, canvas.width / 2, canvas.height / 2);
 	}
 
 	/** 简化 Viridis 调色板：5 段线性插值，输入 v ∈ [0,1]。*/

@@ -130,6 +130,8 @@ html, body {
 	font-size: 0.8em;
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
+	display: flex;
+	align-items: center;
 }
 
 .plot-controls {
@@ -202,6 +204,105 @@ html, body {
 
 .length-reset-btn:hover {
 	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* “Plot” 手动确认绘图按钮——主色调，右对齐 */
+.apply-plot-btn {
+	margin-left: auto;
+	background: var(--vscode-button-background);
+	color: var(--vscode-button-foreground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	padding: 3px 12px;
+	font-size: 0.85em;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.apply-plot-btn:hover {
+	background: var(--vscode-button-hoverBackground);
+}
+
+/* Table 侧 “Export .bin” 按钮——二级调，与 side-title 并面 */
+.export-bin-btn {
+	margin-left: auto;
+	background: var(--vscode-button-secondaryBackground);
+	color: var(--vscode-button-secondaryForeground);
+	border: 1px solid var(--vscode-button-border, transparent);
+	border-radius: 3px;
+	padding: 2px 8px;
+	font-size: 0.78em;
+	cursor: pointer;
+	display: inline-block;
+}
+
+.export-bin-btn:hover {
+	background: var(--vscode-button-secondaryHoverBackground);
+}
+
+.export-bin-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Heatmap (2D) Rows/Cols 输入 —— 仅 heatmap-2d 模式下显示 */
+.heatmap-controls {
+	display: none;
+	align-items: center;
+	gap: 4px;
+	margin-left: 6px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+}
+
+.heatmap-controls.active {
+	display: inline-flex;
+}
+
+.heatmap-controls input {
+	width: 64px;
+	background: var(--vscode-input-background, var(--vscode-editor-background));
+	color: var(--vscode-input-foreground, var(--vscode-editor-foreground));
+	border: 1px solid var(--vscode-input-border, var(--vscode-widget-border, rgba(255,255,255,0.15)));
+	border-radius: 3px;
+	padding: 3px 6px;
+	font-size: 0.85em;
+	font-family: var(--vscode-editor-font-family), monospace;
+}
+
+.heatmap-controls input:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+/* main canvas 默认由 Chart.js 自行处理；切到 heatmap 模式时启用像素拉伸 */
+.main-plot.heatmap canvas {
+	image-rendering: pixelated;
+	image-rendering: crisp-edges;
+	background: var(--vscode-editor-background);
+	border: 1px solid var(--vscode-widget-border, rgba(255,255,255,0.08));
+	border-radius: 3px;
+}
+
+/* Heatmap 鼠标悬停 tooltip（仅 heatmap-2d 模式下按需显示）*/
+.heatmap-tooltip {
+	position: absolute;
+	pointer-events: none;
+	background: var(--vscode-editorHoverWidget-background, rgba(0,0,0,0.85));
+	color: var(--vscode-editorHoverWidget-foreground, #fff);
+	border: 1px solid var(--vscode-editorHoverWidget-border, rgba(255,255,255,0.15));
+	border-radius: 3px;
+	padding: 4px 8px;
+	font-family: var(--vscode-editor-font-family), monospace;
+	font-size: 0.78em;
+	line-height: 1.4;
+	z-index: 5;
+	white-space: nowrap;
+	display: none;
+}
+
+.heatmap-tooltip.active {
+	display: block;
 }
 
 .plot-area {

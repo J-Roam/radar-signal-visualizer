@@ -7,6 +7,8 @@
  *
  *   [1] sine_signal   std::vector<float>           —— 实数正弦
  *   [2] lfm_signal    std::vector<cuFloatComplex>  —— 复数线性调频 (LFM chirp)
+ *   [3] prt_signal    std::vector<cuFloatComplex>  —— 多 PRT 偏真实雷达回波
+ *                     (1024×64 行主序，每个 PRT 前 512 点 = LFM，后 512 点 = 0)
  *
  * 参数设计思路（便于肉眼核对插件绘图是否正确）：
  *
@@ -87,6 +89,28 @@ __global__ void generateLfmChirpKernel(cuFloatComplex* signal, int N, float fs, 
     signal[tid] = make_cuFloatComplex(cosf(phase), sinf(phase));
 }
 
+/* ---------------------------------------------------------------------
+ * Kernel 3: 生成多 PRT 偏真实雷达信号（行主序：prt_idx * PRT_N + n）
+ *   • 每个 PRT 前 LFM_USED 点 = 同一个 LFM chirp
+ *   • 每个 PRT 后 (PRT_N - LFM_USED) 点 = 0（回波静默段）
+ *   • 所有 PRT 内容相同（后续可改为加 Doppler 相位扩展）
+ * --------------------------------------------------------------------- */
+__global__ void generatePrtFrameKernel(cuFloatComplex* frame, int PRT_N, int PRT_NUM,
+                                       int LFM_USED, float fs, float f0, float k) {
+    int n       = blockIdx.x * blockDim.x + threadIdx.x;  // 当前 PRT 内样本索引
+    int prt_idx = blockIdx.y;                              // 当前 PRT 索引
+    if (n >= PRT_N || prt_idx >= PRT_NUM) return;
+    cuFloatComplex v;
+    if (n < LFM_USED) {
+        float t     = static_cast<float>(n) / fs;
+        float phase = 2.0f * PI * (f0 * t + 0.5f * k * t * t);
+        v = make_cuFloatComplex(cosf(phase), sinf(phase));
+    } else {
+        v = make_cuFloatComplex(0.0f, 0.0f);
+    }
+    frame[prt_idx * PRT_N + n] = v;
+}
+
 int main() {
     // ---------------- 正弦信号参数 ----------------
     const int SINE_N = 512;
@@ -102,25 +126,38 @@ int main() {
     const float LFM_K = LFM_BW / LFM_T;                      // 调频斜率
     const float LFM_F0 = -LFM_BW / 2.0f;                     // 起始频率（中心零频）
 
+    // ---------------- 多 PRT 信号参数 ----------------
+    const int PRT_N     = 1024;              // 每个 PRT 点数
+    const int PRT_NUM   = 64;                // PRT 个数
+    const int PRT_TOTAL = PRT_N * PRT_NUM;   // 总采样数 = 65536
+    const int LFM_USED  = 512;               // 每个 PRT 前 LFM_USED 点使用 LFM，其余填 0
+
     // ---------------- Host 可视化目标 ----------------
     std::vector<float> sine_signal(SINE_N);
     std::vector<cuFloatComplex> lfm_signal(LFM_N);
+    std::vector<cuFloatComplex> prt_signal(PRT_TOTAL);
 
     // ---------------- Device 缓冲区 ----------------
     float* d_sine = nullptr;
     cuFloatComplex* d_lfm = nullptr;
+    cuFloatComplex* d_prt = nullptr;
     CUDA_CHECK(cudaMalloc(&d_sine, SINE_N * sizeof(float)));
     CUDA_CHECK(cudaMalloc(&d_lfm, LFM_N * sizeof(cuFloatComplex)));
+    CUDA_CHECK(cudaMalloc(&d_prt, PRT_TOTAL * sizeof(cuFloatComplex)));
 
     // ---------------- Kernel 启动 ----------------
     const int BLOCK = 128;
     generateSineKernel<<<(SINE_N + BLOCK - 1) / BLOCK, BLOCK>>>(d_sine, SINE_N, SINE_FS, SINE_F, SINE_A);
     generateLfmChirpKernel<<<(LFM_N + BLOCK - 1) / BLOCK, BLOCK>>>(d_lfm, LFM_N, LFM_FS, LFM_F0, LFM_K);
+    // 多 PRT 用 2D grid：x 维覆盖单 PRT 内样本，y 维覆盖 PRT 索引
+    dim3 prtGrid((PRT_N + BLOCK - 1) / BLOCK, PRT_NUM);
+    generatePrtFrameKernel<<<prtGrid, BLOCK>>>(d_prt, PRT_N, PRT_NUM, LFM_USED, LFM_FS, LFM_F0, LFM_K);
     CUDA_CHECK(cudaDeviceSynchronize());
 
     // ---------------- 拷回 host ----------------
     CUDA_CHECK(cudaMemcpy(sine_signal.data(), d_sine, SINE_N * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(lfm_signal.data(), d_lfm, LFM_N * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(prt_signal.data(), d_prt, PRT_TOTAL * sizeof(cuFloatComplex), cudaMemcpyDeviceToHost));
 
     float* sine = sine_signal.data();
 
@@ -132,6 +169,8 @@ int main() {
     std::cout << "Sine : N=" << SINE_N << " fs=" << SINE_FS << "Hz freq=" << SINE_F << "Hz amp=" << SINE_A << std::endl;
     std::cout << "LFM  : N=" << LFM_N << " fs=" << LFM_FS << "Hz BW=" << LFM_BW << "Hz f0=" << LFM_F0
               << "Hz k=" << LFM_K << "Hz/s" << std::endl;
+    std::cout << "PRT  : PRT_N=" << PRT_N << " PRT_NUM=" << PRT_NUM
+              << " total=" << PRT_TOTAL << " LFM_USED=" << LFM_USED << std::endl;
 
     std::cout << "sine_signal[0..4]: ";
     for (int i = 0; i < 5; ++i) std::cout << sine_signal[i] << " ";
@@ -143,7 +182,18 @@ int main() {
     }
     std::cout << std::endl;
 
+    // 用首 PRT 前 2 点 + 第 2 PRT 首点 + 同 PRT 内静默段（511, 512）做肉眼自检
+    std::cout << "prt_signal[0..1]: ";
+    for (int i = 0; i < 2; ++i) {
+        std::cout << "(" << prt_signal[i].x << "," << prt_signal[i].y << ") ";
+    }
+    std::cout << " prt1[0]=(" << prt_signal[PRT_N].x << "," << prt_signal[PRT_N].y << ")"
+              << " prt0[511]=(" << prt_signal[LFM_USED - 1].x << "," << prt_signal[LFM_USED - 1].y << ")"
+              << " prt0[512]=(" << prt_signal[LFM_USED].x << "," << prt_signal[LFM_USED].y << ")"
+              << std::endl;
+
     cudaFree(d_sine);
     cudaFree(d_lfm);
+    cudaFree(d_prt);
     return 0;
 }

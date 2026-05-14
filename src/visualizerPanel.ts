@@ -61,6 +61,8 @@ export class SignalVisualizerPanel {
 				this.ready = true;
 				// 握手后把已有的 pin 同步一次
 				this.syncAllCards(this.dataProvider.getPinned());
+			} else if (message?.command === 'exportBin') {
+				this.handleExportBin(message.id, message.length);
 			}
 		}, null, this._disposables);
 
@@ -112,6 +114,54 @@ export class SignalVisualizerPanel {
 		// webview 未 ready 时也调 postMessage —— VSCode 会缓冲到 ready 为止。
 		// 显式 ready 标志仅用于第一次 syncAllCards 时机控制。
 		this._panel.webview.postMessage(message);
+	}
+
+	// ================================================================
+	// 导出为 .bin：根据 elementType 以原始裸字节写入（无 header）
+	// 复数交错 (re,im,re,im,...)，little-endian。
+	// numpy: np.fromfile(path, dtype='<f4'/'<f8'/'<c8'/'<c16'/...)
+	// ================================================================
+
+	private async handleExportBin(id: string, length: number) {
+		const v = this.dataProvider.getPinned().find(p => p.id === id);
+		if (!v) {
+			vscode.window.showWarningMessage('Export failed: variable not found.');
+			return;
+		}
+		if (!v.lastData || v.lastData.length === 0) {
+			vscode.window.showWarningMessage(`Export failed: "${v.displayName}" has no data.`);
+			return;
+		}
+		const total = v.lastData.length;
+		let eff = Math.max(1, Math.min(length || total, total));
+		const re = v.lastData.slice(0, eff);
+		const im = v.lastDataIm ? v.lastDataIm.slice(0, eff) : undefined;
+
+		const safeName = sanitizeFileName(v.displayName);
+		const safeType = sanitizeFileName(v.elementType);
+		const defaultFileName = `${safeName}_${safeType}_${eff}.bin`;
+		const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+		const defaultUri = wsFolder
+			? vscode.Uri.joinPath(wsFolder, defaultFileName)
+			: vscode.Uri.file(defaultFileName);
+
+		const target = await vscode.window.showSaveDialog({
+			defaultUri,
+			filters: { 'Binary': ['bin'], 'All Files': ['*'] },
+			saveLabel: 'Export',
+			title: `Export ${v.displayName} (${v.elementType} × ${eff}) to .bin`,
+		});
+		if (!target) return; // 用户取消
+
+		try {
+			const bytes = serializeToBin(v.elementType, v.isComplex, re, im);
+			await vscode.workspace.fs.writeFile(target, bytes);
+			vscode.window.showInformationMessage(
+				`Exported ${eff} elements (${v.elementType}${v.isComplex ? ', interleaved I/Q' : ''}) → ${target.fsPath}`
+			);
+		} catch (err: any) {
+			vscode.window.showErrorMessage(`Export failed: ${err?.message ?? String(err)}`);
+		}
 	}
 
 	public update() {
@@ -166,4 +216,122 @@ function getNonce() {
 		text += possible.charAt(Math.floor(Math.random() * possible.length));
 	}
 	return text;
+}
+
+/**
+ * 文件名 sanitize：去掉 Windows 不允许的字符 + 空格 + std::xxx 中的冒号
+ * 仅限底线，保留字母数字下划线点号。
+ */
+function sanitizeFileName(s: string): string {
+	return s.replace(/[<>:"/\\|?*\s]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+}
+
+/**
+ * 按 elementType 将 number[] 序列化为裸字节。
+ *
+ *  实数：只用 re；复数：交错写 (re,im,re,im,...)
+ *  输出 little-endian，无 header，numpy / MATLAB 可直接 fromfile 读取。
+ */
+function serializeToBin(et: string, isComplex: boolean, re: number[], im?: number[]): Uint8Array {
+	const N = re.length;
+	if (isComplex) {
+		const im2 = im ?? new Array(N).fill(0);
+		switch (et) {
+			case 'cuFloatComplex':
+			case 'std::complex<float>':
+			case 'float2': {
+				const buf = new ArrayBuffer(N * 8);
+				const v = new DataView(buf);
+				for (let i = 0; i < N; i++) {
+					v.setFloat32(i * 8,     re[i],  true);
+					v.setFloat32(i * 8 + 4, im2[i], true);
+				}
+				return new Uint8Array(buf);
+			}
+			case 'cuDoubleComplex':
+			case 'std::complex<double>':
+			case 'double2': {
+				const buf = new ArrayBuffer(N * 16);
+				const v = new DataView(buf);
+				for (let i = 0; i < N; i++) {
+					v.setFloat64(i * 16,     re[i],  true);
+					v.setFloat64(i * 16 + 8, im2[i], true);
+				}
+				return new Uint8Array(buf);
+			}
+			default:
+				throw new Error(`Unsupported complex elementType for export: "${et}"`);
+		}
+	}
+	// 实数
+	switch (et) {
+		case 'float': {
+			const arr = new Float32Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return new Uint8Array(arr.buffer);
+		}
+		case 'double': {
+			const arr = new Float64Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return new Uint8Array(arr.buffer);
+		}
+		case 'int':
+		case 'int32_t': {
+			const arr = new Int32Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i] | 0;
+			return new Uint8Array(arr.buffer);
+		}
+		case 'uint32_t':
+		case 'unsigned int': {
+			const arr = new Uint32Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i] >>> 0;
+			return new Uint8Array(arr.buffer);
+		}
+		case 'short':
+		case 'int16_t': {
+			const arr = new Int16Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return new Uint8Array(arr.buffer);
+		}
+		case 'uint16_t':
+		case 'unsigned short': {
+			const arr = new Uint16Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return new Uint8Array(arr.buffer);
+		}
+		case 'char':
+		case 'int8_t':
+		case 'signed char': {
+			const arr = new Int8Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return new Uint8Array(arr.buffer);
+		}
+		case 'uint8_t':
+		case 'unsigned char': {
+			const arr = new Uint8Array(N);
+			for (let i = 0; i < N; i++) arr[i] = re[i];
+			return arr;
+		}
+		case 'long':
+		case 'int64_t':
+		case 'long long': {
+			// JS Number 仅能精确表达 53-bit 内整数；dataProvider 读出时已是 number，
+			// 这里仅作能达范围内的反向错输出。
+			const arr = new BigInt64Array(N);
+			for (let i = 0; i < N; i++) arr[i] = BigInt(Math.trunc(re[i]));
+			return new Uint8Array(arr.buffer);
+		}
+		case 'unsigned long':
+		case 'uint64_t':
+		case 'unsigned long long': {
+			const arr = new BigUint64Array(N);
+			for (let i = 0; i < N; i++) {
+				const x = Math.trunc(re[i]);
+				arr[i] = x < 0 ? 0n : BigInt(x);
+			}
+			return new Uint8Array(arr.buffer);
+		}
+		default:
+			throw new Error(`Unsupported elementType for export: "${et}"`);
+	}
 }
